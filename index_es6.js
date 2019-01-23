@@ -1,7 +1,9 @@
 'use strict'
+var net = require('net')
 var dgram = require('dgram')
 var EventEmitter = require('events').EventEmitter
 var util = require('util')
+var Rx = require('rxjs')
 
 util.inherits(influx_line_udp, EventEmitter)
 
@@ -10,13 +12,24 @@ function influx_line_udp (host, port) {
   EventEmitter.call(self)
   self.host = host
   self.port = port
-  self.socket = dgram.createSocket('udp4')
-  return self
+  self.packetStream = new Rx.Subject()
+  self.clientConnection = net.createConnection(self.port, self.host);
+      
+  self.pipeline = packetStream.subscribe(x => {
+    self.clientConnection.write(x);
+  }, e => {
+    // output to stdout
+    console.error('influx client connection died', e);
+
+  }, () =>{
+    // stream concluded.
+    console.log('influx client connection ended');
+  });
 }
 
 module.exports = influx_line_udp
 
-influx_line_udp.prototype.send = function (mesurement, fields, tags={}, timestamp=undefined) {
+influx_line_udp.prototype.send = function (mesurement, fields, tags = {}, timestamp = undefined) {
   let self = this
   if (!mesurement || typeof mesurement !== 'string') {
     return self.emit('error', 'mesurement should be string')
@@ -49,17 +62,7 @@ influx_line_udp.prototype.send = function (mesurement, fields, tags={}, timestam
 
   let data = `${mesurement}${escapeTags.length > 0 ? ',' + escapeTags : ''} ${escaped_fields_str}${timestamp ? ' ' + timestamp : timestamp}`
 
-  if (!self.socket) {
-    self.socket = dgram.createSocket('udp4')
-  }
-  _send(self.socket, data, 0, self.port, self.host)
-}
-
-function _send (socket, data, offset, port, host) {
-  if (!Buffer.isBuffer(data)) {
-    data = new Buffer(data)
-  }
-  socket.send(data, offset, data.length, port, host)
+  self.packetStream.next(data);
 }
 
 function isObject (obj) {
