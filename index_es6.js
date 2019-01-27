@@ -1,30 +1,47 @@
 'use strict'
 var net = require('net')
-var dgram = require('dgram')
 var EventEmitter = require('events').EventEmitter
 var util = require('util')
 var Rx = require('rxjs')
+let __instances = new Map()
 
 util.inherits(influx_line_udp, EventEmitter)
 
 function influx_line_udp (host, port) {
   var self = this
   EventEmitter.call(self)
-  self.host = host
-  self.port = port
-  self.packetStream = new Rx.Subject()
-  self.clientConnection = net.createConnection(self.port, self.host);
-      
-  self.pipeline = packetStream.subscribe(x => {
-    self.clientConnection.write(x);
+
+  if (__instances.get(port)) {
+    console.log('found the writer')
+    self.writer = __instances.get(port)
+    return
+  }
+  // console.log('writers', __instances)
+  // console.log('did not find the writer')
+  self.writer = {
+    host: host,
+    port: port,
+    packetStream: new Rx.Subject(),
+    clientConnection: net.createConnection(port, host)
+  }
+
+  // console.log('setting the subscriber')
+
+  __instances.set(port, self.writer)
+  // console.log('set writer', __instances)
+
+  self.writer.packetStream.subscribe(x => {
+    console.log('writing to port', self.writer.port)
+    self.writer.clientConnection.write(x)
+    self.writer.clientConnection.write('\n')
+    console.log('wrote to port')
   }, e => {
     // output to stdout
-    console.error('influx client connection died', e);
-
-  }, () =>{
+    console.error('influx client connection died')
+  }, () => {
     // stream concluded.
-    console.log('influx client connection ended');
-  });
+    console.log('influx client connection ended')
+  })
 }
 
 module.exports = influx_line_udp
@@ -62,7 +79,7 @@ influx_line_udp.prototype.send = function (mesurement, fields, tags = {}, timest
 
   let data = `${mesurement}${escapeTags.length > 0 ? ',' + escapeTags : ''} ${escaped_fields_str}${timestamp ? ' ' + timestamp : timestamp}`
 
-  self.packetStream.next(data);
+  self.writer.packetStream.next(data)
 }
 
 function isObject (obj) {

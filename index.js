@@ -1,18 +1,48 @@
 'use strict';
 
-var dgram = require('dgram');
+var net = require('net');
 var EventEmitter = require('events').EventEmitter;
 var util = require('util');
+var Rx = require('rxjs');
+let __instances = new Map();
 
 util.inherits(influx_line_udp, EventEmitter);
 
 function influx_line_udp(host, port) {
   var self = this;
   EventEmitter.call(self);
-  self.host = host;
-  self.port = port;
-  self.socket = dgram.createSocket('udp4');
-  return self;
+
+  if (__instances.get(port)) {
+    console.log('found the writer');
+    self.writer = __instances.get(port);
+    return;
+  }
+  // console.log('writers', __instances)
+  // console.log('did not find the writer')
+  console.log('#{');
+  self.writer = {
+    host: host,
+    port: port,
+    packetStream: new Rx.Subject(),
+    clientConnection: net.createConnection(port, host)
+
+    // console.log('setting the subscriber')
+
+  };__instances.set(port, self.writer);
+  // console.log('set writer', __instances)
+
+  self.writer.packetStream.subscribe(x => {
+    console.log('writing to port', self.writer.port);
+    self.writer.clientConnection.write(x);
+    self.writer.clientConnection.write('\n');
+    console.log('wrote to port');
+  }, e => {
+    // output to stdout
+    console.error('influx client connection died');
+  }, () => {
+    // stream concluded.
+    console.log('influx client connection ended');
+  });
 }
 
 module.exports = influx_line_udp;
@@ -50,18 +80,8 @@ influx_line_udp.prototype.send = function (mesurement, fields, tags = {}, timest
 
   let data = `${mesurement}${escapeTags.length > 0 ? ',' + escapeTags : ''} ${escaped_fields_str}${timestamp ? ' ' + timestamp : timestamp}`;
 
-  if (!self.socket) {
-    self.socket = dgram.createSocket('udp4');
-  }
-  _send(self.socket, data, 0, self.port, self.host);
+  self.writer.packetStream.next(data);
 };
-
-function _send(socket, data, offset, port, host) {
-  if (!Buffer.isBuffer(data)) {
-    data = new Buffer(data);
-  }
-  socket.send(data, offset, data.length, port, host);
-}
 
 function isObject(obj) {
   let type = typeof obj;
